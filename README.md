@@ -1,6 +1,6 @@
 # 干饭宝 · 校园食堂智能助手（Agent for Canteen Meal）
 
-> 一句话：面向高校师生的食堂场景对话式智能体。用 **LangGraph** 编排、**ReAct** 范式驱动推理与工具调用，用 **ChromaDB** 向量库承载菜单与规章知识（RAG），把菜单/营养/人流/工单等能力封装成**独立可部署的 HTTP 技能**供主智能体自动调度，全链路配置**安全护栏**。
+> 一句话：面向高校师生的食堂场景对话式智能体。用 **LangGraph** 编排、**ReAct** 范式驱动推理与工具调用，用 **PostgreSQL + pgvector 构建 GraphRAG** 知识库（向量召回 + 全文召回 + 知识图谱增强）承载菜单与规章知识，把菜单/营养/人流/工单等能力封装成**独立可部署的 HTTP 技能**供主智能体自动调度，全链路配置**安全护栏**。
 
 ---
 
@@ -23,7 +23,7 @@
 | C2 | 个性化菜品推荐（口味、预算、忌口、营养目标、天气） | 工具调用 + 技能 + RAG | S1 `dish-recommender` → T1、T4 |
 | C3 | 营养成分估算与膳食搭配建议 | 技能 + RAG（食物成分知识） | S2 `nutrition-analyzer` |
 | C4 | 排队人流预测 / 错峰建议 | 工具调用 | T2 `crowd-forecast`（可选 T4 天气特征） |
-| C5 | 食堂规章问答（营业时间、支付方式、失物招领、资助政策） | RAG（ChromaDB） | — |
+| C5 | 食堂规章问答（营业时间、支付方式、失物招领、资助政策） | GraphRAG（PostgreSQL + pgvector） | — |
 | C6 | 投诉建议、报修与失物招领工单 | 工具调用 + **人工确认中断** | T3 `feedback-ticket` |
 | C7 | 食品安全与过敏原风险提示 | 安全护栏（强制注入） | — |
 | C8 | 多轮追问、上下文记忆、用户偏好长期记忆 | LangGraph Checkpointer + Profile Store | — |
@@ -37,7 +37,7 @@
 | --- | --- | --- |
 | 编排框架 | **LangGraph** | 有状态图、条件边、子图、持久化 Checkpoint、Human-in-the-loop 中断 |
 | 推理范式 | **ReAct**（Thought → Action → Observation → …） | 以子图形式实现循环，带最大轮次与早停 |
-| 向量数据库 | **ChromaDB**（PersistentClient / 服务端模式） | 轻量、支持 metadata 过滤、HNSW 索引、易本地化部署（数据不出校） |
+| 向量数据库 | **PostgreSQL + pgvector**（GraphRAG） | 向量、全文、图谱同库同事务；HNSW 索引 + `tsvector` 中文全文 + 实体关系图；数据不出校 |
 | 大模型 | 主模型（推理/工具选择）+ 轻量模型（护栏/改写/Embedding Rerank） | 双模型分层控成本 |
 | 技能 / 工具形态 | 独立 HTTP 微服务（FastAPI）+ OpenAPI 契约 | 技能（8100+）与工具（8200+）均可单独部署、单独压测、单独灰度 |
 | 缓存/熔断 | Redis + 本地 LRU | 四级降级：L0 实时 → L1 缓存 → L2 快照/基线 → L3 向量召回 → L4 兜底话术 |
@@ -52,7 +52,7 @@
 | --- | --- | --- |
 | ① 至少 1 个独立封装技能（HTTP 接口/工具节点/工作流，标准 JSON 入出参、可被主智能体自动调度、有容错） | **6 个能力**：`skills/` 下 2 个技能（S1/S2）+ `agent/tools/` 下 4 个工具（T1–T4），统一信封 + 错误码 + 熔断降级；主智能体通过 Tool Registry 自动发现与调度 | [技能封装规范](docs/04-技能封装规范.md) · [能力清单](docs/05-技能清单与接口契约.md) |
 | ② 安全护栏（敏感内容过滤、风险提示、合规问答） | 入站闸门（注入检测/PII 脱敏/意图分级）+ 出站闸门（事实核验/合规改写/免责声明注入） | [安全护栏](docs/07-安全护栏.md) |
-| ③ RAG 访问向量数据库（ChromaDB） | 7 个 Collection（与知识库目录一一对应）、混合检索 + Rerank + 溯源引用、增量 upsert | [RAG 与 ChromaDB](docs/06-RAG与ChromaDB知识库.md) |
+| ③ RAG 访问向量数据库（PostgreSQL + pgvector） | 7 个知识域（`kb` schema 分区表）、向量 + 全文 + 图谱混合检索、GraphRAG 社区摘要、增量 upsert、溯源引用 | [GraphRAG 与 PostgreSQL 向量存储](docs/06-GraphRAG知识库与PostgreSQL向量存储.md) · [数据库 Schema 与 SQL](docs/11-数据库Schema与SQL清单.md) |
 | ④ LangGraph 架构 + ReAct 范式 | 主图（护栏→规划→检索→行动→观察→反思→出栏）+ ReAct 子图循环 | [总体架构](docs/02-总体架构.md) · [状态机与 ReAct](docs/03-LangGraph状态机与ReAct范式.md) |
 
 ---
@@ -94,8 +94,8 @@ Agent-for-Canteen-Meal/
 ③ 工具执行 → 超时 800ms → 上游超时 → 重试 1 次 → 熔断未开 → 降级到 60s 缓存
               → 返回 data_version + degraded 标记 + 每道菜的 verified_date
 ④ ReAct 第 2 轮：Observation「命中 3 道菜，其中 2 道含辣标记」→ Thought「需核对辣度与过敏原交叉污染」
-              Action: rag_retrieve(collection=food_safety, q="花生 交叉污染 加工线")
-⑤ RAG → ChromaDB 召回 5 段（仅 status=published）→ Rerank → 取 Top3，带 doc_id/chunk_id 溯源
+              Action: rag_retrieve(domain=food_safety, q="花生 交叉污染 加工线")
+⑤ RAG → PostgreSQL(pgvector) 召回 5 段（仅 status=published）→ Rerank → 取 Top3，带 doc_id/chunk_id 溯源
 ⑥ 反思节点 → 校验「价格≤15 ✓ / 无花生 ✓ / 数据非实时 ✗ 需标注」
 ⑦ 出站护栏 → 强制注入："过敏信息仅供参考，请到窗口向工作人员确认配料与交叉污染情况"
 ⑧ 输出 → 菜品卡片 + 价格 + 窗口 + 供应时段 + 核验日期 + 数据来源时间戳 + 风险提示 + 引用来源
@@ -131,11 +131,12 @@ Agent-for-Canteen-Meal/
 | [03-LangGraph 状态机与 ReAct](docs/03-LangGraph状态机与ReAct范式.md) | State 定义、节点/边、ReAct 子图、中断与记忆 |
 | [04-技能封装规范](docs/04-技能封装规范.md) | ★ 技能五要素、JSON 信封、错误码、容错、注册与自动调度 |
 | [05-技能清单与接口契约](docs/05-技能清单与接口契约.md) | ★ 6 个能力（T1–T4 工具 / S1–S2 技能）的完整入出参、调用关系与 SLA |
-| [06-RAG 与 ChromaDB](docs/06-RAG与ChromaDB知识库.md) | ★ Collection 设计、切片、检索链路、更新与溯源 |
+| [06-GraphRAG 与 PostgreSQL 向量存储](docs/06-GraphRAG知识库与PostgreSQL向量存储.md) | ★ 写入链路、分块与向量化、存储设计、混合检索 + 图谱增强、质量与风险 |
 | [07-安全护栏](docs/07-安全护栏.md) | ★ 四道闸门、敏感分类处置、注入防御、合规话术库 |
 | [08-数据与接口设计](docs/08-数据与接口设计.md) | 数据模型、对外 API、流式、限流 |
 | [09-评测与可观测性](docs/09-评测与可观测性.md) | 评测集、指标、追踪、告警 |
 | [10-实施计划与部署](docs/10-实施计划与部署.md) | 五阶段里程碑、部署拓扑、容量估算 |
+| [11-数据库 Schema 与 SQL 清单](docs/11-数据库Schema与SQL清单.md) | ★ 可执行建库 DDL、索引、写入/检索/巡检 SQL、权限 |
 
 ---
 

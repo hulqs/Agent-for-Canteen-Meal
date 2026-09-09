@@ -104,7 +104,7 @@
 | 营养目标不可满足 | 返回最接近方案 + 说明差距（"最低 680 kcal，略超你的 650 目标"） | `0` + `warnings` |
 | 用户画像缺失 | 使用默认偏好（均衡、中位预算） | `profile=default` |
 
-> 推荐素材（特色菜卡、按预算推荐）来自 ChromaDB `canteen_dish_features`，仅取 `status=published` 且带 `verified_date` 的条目。
+> 推荐素材（特色菜卡、按预算推荐）来自 PostgreSQL `canteen_dish_features` 域，仅取 `status=published` 且带 `verified_date` 的条目。
 
 硬约束（**任何降级路径都不允许放宽**）：过敏原过滤、忌口过滤。
 

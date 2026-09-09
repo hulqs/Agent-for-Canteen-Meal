@@ -78,4 +78,4 @@ GET  /metrics
 - [ ] 已在 `agent/tools/registry.py` 注册
 - [ ] 已在 `docs/05-技能清单与接口契约.md` 的**总表、附 A（场景矩阵）、附 B（文档索引）**三处同步登记
 - [ ] 已在 `docs/00-项目结构.md` 端口表续号；枚举取值与 `docs/08 §1.4` 字典一致
-- [ ] 实时类数据已确认不写入 ChromaDB
+- [ ] 实时类数据已确认不写入 PostgreSQL 知识库

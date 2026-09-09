@@ -8,7 +8,7 @@
 | 版本 | `0.3.0` |
 | 端口 | `8102`（技能段 8100+） |
 | 类型 | 只读（估算） |
-| 依赖 | 本地食物成分表、ChromaDB `nutrition_knowledge`、估算模型 |
+| 依赖 | 本地食物成分表、PostgreSQL `nutrition_knowledge` 域、估算模型 |
 | SLA | P95 ≤ 600ms |
 
 ---
@@ -87,7 +87,7 @@
 | 情况 | 处理 | `code` / 标记 |
 | --- | --- | --- |
 | 菜品不在成分表 | 用同类菜品中位值估算 | `confidence=low` + `meta.warnings` |
-| 成分表服务不可用 | 降级为 ChromaDB `nutrition_knowledge` 语义召回的近似值 | `degraded=true`，`source=vector_recall` |
+| 成分表服务不可用 | 降级为 PostgreSQL `nutrition_knowledge` 域语义召回的近似值 | `degraded=true`，`source=vector_recall` |
 | 完全无法估算 | 返回 `40404` + "暂无法估算该菜品，建议咨询食堂公示的营养信息" | `40404` |
 | 用户画像缺失 | 用同年龄段默认值，标注 `profile=default` | `confidence=medium` |
 | 求解超时 300ms | 返回当前已完成的部分结果（缺项置 null） | `degraded=true` |

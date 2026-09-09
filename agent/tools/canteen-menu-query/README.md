@@ -183,7 +183,7 @@ GET  http://canteen-menu-query:8201/metrics
 | L0 | 上游菜单 API | 正常 | `upstream_api` | 无 |
 | L1 | Redis 缓存（TTL 60s） | 上游超时 / 5xx | `cache` | "数据为 60 秒前" |
 | L2 | 昨日同餐次快照 | 缓存未命中 | `snapshot` | "参考昨日菜单，今日可能有调整" |
-| L3 | ChromaDB 向量召回（仅 `status=published`） | 快照缺失 | `vector_recall` | "以下为历史/文档信息，可能不准确" |
+| L3 | PostgreSQL 向量召回（仅 `status=published`） | 快照缺失 | `vector_recall` | "以下为历史/文档信息，可能不准确" |
 | L4 | 兜底话术 | 全部失败 | `none` | `code=50420`，话术可直接念给用户 |
 
 ### 5.2 参数配置（`config.yaml`）
@@ -322,7 +322,7 @@ agent/tools/canteen-menu-query/
 │   │   ├── upstream.py  🔲 上游菜单 API 适配器
 │   │   ├── cache.py     🔲 Redis 缓存
 │   │   ├── snapshot.py  🔲 昨日快照
-│   │   └── chroma.py    🔲 向量召回兜底
+│   │   └── vector_recall.py  🔲 PostgreSQL 向量召回兜底
 │   ├── resilience.py    🔲 超时/重试/熔断/降级链
 │   └── errors.py        🔲 错误码
 └── tests/               🔲 契约测试 + 故障注入测试

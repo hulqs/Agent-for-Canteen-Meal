@@ -100,7 +100,7 @@ stateDiagram-v2
 
 | Action | 说明 | 产出 |
 | --- | --- | --- |
-| `rag_retrieve` | 查 ChromaDB（可指定 collection、metadata 过滤、Top-K）；默认过滤 `status=published` | `retrieved_docs` |
+| `rag_retrieve` | 查 PostgreSQL（kb schema，可指定 domain、结构化过滤、Top-K、是否图增强）；默认过滤 `status=published` | `retrieved_docs` |
 | `skill_call` | 调用已注册**技能**（S1/S2，`skills/`，8100+；**由模型自主选择**） | `tool_results` |
 | `tool_call` | 调用已注册**工具**（T1–T4，`agent/tools/`，8200+；**由模型自主选择**） | `tool_results` |
 | `ask_clarify` | 信息不足，向用户追问（如"哪个校区？"） | 中断返回问题 |
