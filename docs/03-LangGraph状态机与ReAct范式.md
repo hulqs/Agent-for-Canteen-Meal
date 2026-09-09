@@ -19,8 +19,9 @@
 | `plan` | str | Planner 产出的自然语言计划 |
 | `scratchpad` | list[Step] | **ReAct 轨迹**：`{thought, action, action_input, observation, round}` |
 | `retrieved_docs` | list[DocChunk] | RAG 召回：`{doc_id, chunk_id, text, score, metadata, source}` |
-| `tool_results` | list[SkillResult] | 技能返回（含降级/失败） |
+| `tool_results` | list[SkillResult \| ToolResult] | 技能/工具返回（含降级/失败），二者信封同构 |
 | `degraded` | bool | 本次回答是否使用了降级数据（影响是否需要"以现场为准"提示） |
+| `feature_flags` | dict | 可选特征生效情况，如 `{weather_used: false}`；特征缺失**不置** `degraded` |
 | `citations` | list[Citation] | 最终引用清单 |
 | `draft_answer` | str | Reflector 通过后的草稿 |
 | `final_answer` | str | 出站护栏后的终稿 |
@@ -78,7 +79,8 @@ stateDiagram-v2
         ┌──────────────┼──────────────┬─────────────────┐
         ▼              ▼              ▼                 ▼
   ┌───────────┐  ┌───────────┐  ┌────────────┐   ┌──────────┐
-  │ rag_retrieve│  │ skill_call │  │ ask_clarify│   │  finish  │
+  │ rag_retrieve│  │ capability │  │ ask_clarify│   │  finish  │
+  │            │  │ _call      │  │            │   │          │
   └─────┬─────┘  └─────┬─────┘  └─────┬──────┘   └────┬─────┘
         └──────────────┴──────────────┘               │
                        ▼                              │
@@ -92,14 +94,19 @@ stateDiagram-v2
                     返回主图
 ```
 
-### 3.1 三种 Action
+### 3.1 Action 集合
+
+`capability_call` 按目标类型拆为 `skill_call` 与 `tool_call` 两个**并发可并行**的 Action，二者返回信封完全同构（`{request_id, code, message, data, meta}`），由 `observe` 统一归一化后写入 `tool_results`。
 
 | Action | 说明 | 产出 |
 | --- | --- | --- |
-| `rag_retrieve` | 查 ChromaDB（可指定 collection、metadata 过滤、Top-K） | `retrieved_docs` |
-| `skill_call` | 调用已注册技能（**由模型从注册表自主选择**） | `tool_results` |
+| `rag_retrieve` | 查 ChromaDB（可指定 collection、metadata 过滤、Top-K）；默认过滤 `status=published` | `retrieved_docs` |
+| `skill_call` | 调用已注册**技能**（S1/S2，`skills/`，8100+；**由模型自主选择**） | `tool_results` |
+| `tool_call` | 调用已注册**工具**（T1–T4，`agent/tools/`，8200+；**由模型自主选择**） | `tool_results` |
 | `ask_clarify` | 信息不足，向用户追问（如"哪个校区？"） | 中断返回问题 |
 | `finish` | 认为信息充分，退出循环 | — |
+
+> 模型侧只需区分"技能"与"工具"两类注册表；**禁止**在主图里写 `if "天气" in query: call_weather()` 这类硬编码路由。
 
 ### 3.2 并行执行
 
@@ -110,7 +117,7 @@ stateDiagram-v2
 | 条件 | 行为 |
 | --- | --- |
 | `iteration >= max_iterations`（默认 6） | 强制退出，用已获得的信息作答并声明"信息可能不完整" |
-| 连续 2 轮同一技能同一参数失败 | 禁止再调用该技能，强制换工具或降级回答 |
+| 连续 2 轮同一能力（技能/工具）同一参数失败 | 禁止再调用该能力，强制换能力或降级回答 |
 | 连续 2 轮 Thought 高度相似（余弦 > 0.92） | 判定陷入循环，强制退出 |
 | 单轮 Token 超预算 | 压缩 scratchpad（只保留 action + 结论，丢弃冗长 observation）后继续 |
 
@@ -119,11 +126,21 @@ stateDiagram-v2
 无论技能成功、降级还是失败，`observe` 都产出**结构化文本**供模型消费，绝不抛异常：
 
 ```
-[skill=canteen-menu-query] status=DEGRADED code=50410
+[tool=T1 canteen-menu-query] status=DEGRADED code=50410 source=cache
 message=上游菜单服务超时，已使用 60 秒前缓存
 data_version=menu_2026-09-08_v3 cached_at=11:42:10
-dishes(3): ①香煎鸡胸饭 ¥12 微辣 余量充足 ②…
+dishes(3): ①香煎鸡胸饭 ¥12 不辣 午餐供应 余量充足 verified_date=2026-09-08 ②…
 提示：以下数据非实时，实际以窗口现场为准。
+
+[tool=T4 weather-query] status=OK code=0 source=cache
+issued_at=2026-09-09T15:00+08:00 provider=<气象服务名>
+current=小雨 27.4℃ 体感30.1℃ 降水概率60% walk_comfort=poor
+dining_advice=umbrella[带伞,就近食堂]
+提示：天气为非业务事实，回答需附数据来源与发布时间。
+
+[tool=T4 weather-query] status=DEGRADED code=50420 source=none
+message=暂时查不到天气信息，建议看下窗外或直接留意学校通知～
+提示：本工具为可选特征，其失败不置全局 degraded，后续推荐退化为无天气基线。
 ```
 
 ---
@@ -149,6 +166,6 @@ dishes(3): ①香煎鸡胸饭 ¥12 微辣 余量充足 ②…
 | 原则 | 说明 |
 | --- | --- |
 | 不崩溃 | 任何节点异常 → 写入 `state.error` → 路由到 `guard_out` → 输出安全兜底话术 |
-| 可降级 | 技能三级降级、RAG 无召回降级、护栏组件异常保守放行 |
+| 可降级 | 能力四级降级（实时→缓存→快照/基线→向量召回→兜底）、RAG 无召回降级、护栏组件异常保守放行 |
 | 有痕迹 | 每个降级事件写 `degraded=true` + 原因，最终回答必须向用户披露 |
 | 可回放 | Checkpoint 保存完整 state，运营后台可按 trace_id 回放整条 ReAct 轨迹 |

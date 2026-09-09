@@ -4,10 +4,12 @@
 
 | 项 | 值 |
 | --- | --- |
+> 编号 **T3**（见 `docs/05-技能清单与接口契约.md`）。
+
 | 名称 | `feedback-ticket` |
 | 版本 | `0.4.0` |
-| 端口 | `8105` |
-| 类型 | **写**（唯一写操作技能） |
+| 端口 | `8203`（工具段 8200+） |
+| 类型 | **写**（唯一写操作工具） |
 | 依赖 | Postgres（工单库）、工单通知通道 |
 | SLA | P95 ≤ 800ms |
 | 特殊约束 | **必须经主智能体 LangGraph `interrupt` 人工确认后才真正提交** |
@@ -45,9 +47,9 @@
     "idempotency_key": "req_ULID",
     "category": "complaint",
     "sub_category": "service_attitude",
-    "campus": "东校区",
-    "canteen": "第一食堂",
-    "window": "3F-轻食窗口",
+    "campus": "主校区",
+    "canteen": "一食堂",
+    "window": "2F-轻食窗口",
     "occurred_at": "2026-09-08T11:30:00+08:00",
     "description": "窗口工作人员态度生硬",
     "urgency": "normal",
@@ -61,6 +63,8 @@
 **`category` 枚举**：`complaint` | `suggestion` | `repair` | `food_safety` | `lost_and_found`
 **`urgency`**：`low` | `normal` | `high`（命中"异物/变质/腹泻/食物中毒"自动置 `high` 并触发值班人告警）
 
+> `lost_and_found`（失物招领）对应知识库 `03_营业与服务/食堂规章制度.md` 中的场景：创建工单的同时应把知识库中的**联系部门与联系方式**一并返回给用户；知识库未填写时走"暂未查到 + 建议到值班台询问"。
+
 ---
 
 ## 4. 响应示例（待确认）
@@ -73,7 +77,7 @@
   "data": {
     "ticket_id": "TK20260908000123",
     "status": "pending_confirm",
-    "preview": "工单预览：类别=服务态度投诉 / 地点=东校区第一食堂 3F 轻食窗口 / 时间=2026-09-08 11:30",
+    "preview": "工单预览：类别=服务态度投诉 / 地点=主校区一食堂 2F 轻食窗口 / 时间=2026-09-08 11:30",
     "estimated_response_hours": 24
   },
   "meta": {
@@ -112,14 +116,18 @@ description: >
   不要替用户擅自提交。需要先收集：类别、食堂/窗口、时间、具体描述。
   不要用于：查询（用 canteen_menu_query）、营养（用 nutrition_analyzer）。
 when_to_use:
-  - "我要投诉三楼窗口"
+  - "我要投诉二楼窗口"
   - "建议增加素食窗口"
   - "二食堂空调坏了，报修"
+  - "我水杯落在食堂了"
 when_not_to_use:
   - 用户只是抱怨但没说要投诉 → 先共情，询问是否需要提交工单
+  - 只是问"饭卡去哪补办" → 走 RAG（canteen_rules）
 examples:
-  - q: "我要投诉，今天中午三楼阿姨态度很差"
-    params: { category: "complaint", sub_category: "service_attitude", canteen: "第一食堂", window: "3F", description: "..." }
+  - q: "我要投诉，今天中午二楼阿姨态度很差"
+    params: { category: "complaint", sub_category: "service_attitude", canteen: "一食堂", window: "2F", description: "..." }
+  - q: "我水杯丢在一食堂了"
+    params: { category: "lost_and_found", canteen: "一食堂", description: "..." }
 ```
 
 ---
